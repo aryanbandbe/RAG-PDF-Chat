@@ -1,27 +1,49 @@
-from flask import Flask, request, jsonify
-import requests
+import streamlit as st
+from PyPDF2 import PdfReader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from langchain_community.llms import HuggingFaceEndpoint
 
-app = Flask(__name__)
+# 💬 App title
+st.set_page_config(page_title="📄 Chat with your PDF")
+st.title("📄 Chat with your PDF")
 
-@app.route("/query", methods=["POST"])
-def query_model():
-    data = request.get_json()
-    prompt = data.get("prompt", "")
-    print(f"[Flask] Received prompt: {prompt}")
+# 📤 Upload PDF
+uploaded_file = st.file_uploader("Upload a PDF document", type="pdf")
 
-    try:
-        response = requests.post("http://localhost:11434/api/generate", json={
-            "model": "tinyllama",
-            "prompt": prompt,
-            "stream": False
-        }, timeout=90)
+if uploaded_file:
+    # 🔍 Extract text
+    reader = PdfReader(uploaded_file)
+    full_text = "\n".join([page.extract_text() or "" for page in reader.pages])
 
-        output = response.json().get("response", "")
-        return jsonify({"response": output})
+    # ✂️ Split text into chunks
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    docs = splitter.create_documents([full_text])
 
-    except Exception as e:
-        print(f"[Flask] Error talking to Ollama: {e}")
-        return jsonify({"response": f"\u274c Error: {e}"}), 500
+    # 🔎 Embed and store vectors
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    db = FAISS.from_documents(docs, embeddings)
+    retriever = db.as_retriever()
 
-if __name__ == "__main__":
-    app.run(port=5000)
+    # 🤖 Load LLM via Hugging Face
+    llm = HuggingFaceEndpoint(
+        repo_id="google/flan-t5-base",  
+        huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"], 
+        model_kwargs={"temperature": 0.5, "max_new_tokens": 512}
+    )
+
+    # 🔁 Chain setup
+    qa = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
+
+    # 🧠 Ask a question
+    user_input = st.text_input("Ask a question about the document")
+    if user_input:
+        with st.spinner("Thinking..."):
+            try:
+                result = qa.run(user_input)
+                st.success("Answer:")
+                st.write(result)
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
