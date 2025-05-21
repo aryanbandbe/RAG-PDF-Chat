@@ -1,55 +1,46 @@
 import streamlit as st
-from langchain.document_loaders import PyPDFLoader
+from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
-from langchain.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
-from langchain.llms import HuggingFaceEndpoint
-from huggingface_hub import InferenceClient
-import os
+from langchain_community.llms import HuggingFaceEndpoint
 
-# Set your Hugging Face API token
-os.environ["HUGGINGFACEHUB_API_TOKEN"] = "your_huggingface_api_token"
+st.set_page_config(page_title="📄 Chat with your PDF")
+st.title("📄 Chat with your PDF")
 
-# Initialize the InferenceClient with the specific task
-client = InferenceClient(model="gpt2", token=os.environ["HUGGINGFACEHUB_API_TOKEN"])
+uploaded_file = st.file_uploader("Upload a PDF document", type="pdf")
 
-# Initialize the HuggingFaceEndpoint with the specified task
-llm = HuggingFaceEndpoint(
-    repo_id="gpt2",
-    huggingfacehub_api_token=os.environ["HUGGINGFACEHUB_API_TOKEN"],
-    task="text-generation"
-)
+if uploaded_file:
+    try:
+        reader = PdfReader(uploaded_file)
+        full_text = "\n".join([page.extract_text() or "" for page in reader.pages])
 
-st.title("PDF Question Answering App")
+        splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+        docs = splitter.create_documents([full_text])
 
-# File uploader
-uploaded_file = st.file_uploader("Upload a PDF file", type="pdf")
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-if uploaded_file is not None:
-    # Load and process the PDF
-    loader = PyPDFLoader(uploaded_file)
-    documents = loader.load()
+        db = FAISS.from_documents(docs, embeddings)
+        retriever = db.as_retriever()
 
-    # Split the text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    texts = text_splitter.split_documents(documents)
+        llm = HuggingFaceEndpoint(
+            repo_id="google/flan-t5-base",
+            huggingfacehub_api_token=st.secrets["HUGGINGFACEHUB_API_TOKEN"],
+            model_kwargs={"temperature": 0.5, "max_new_tokens": 512}
+        )
 
-    # Initialize embeddings
-    embeddings = HuggingFaceEmbeddings()
+        qa = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
 
-    # Create a FAISS vector store
-    vectorstore = FAISS.from_documents(texts, embeddings)
+        user_input = st.text_input("Ask a question about the document")
+        if user_input:
+            with st.spinner("Thinking..."):
+                try:
+                    result = qa.run(user_input)
+                    st.success("Answer:")
+                    st.write(result)
+                except Exception as e:
+                    st.error(f"❌ Error during answer generation: {e}")
 
-    # Create a retriever
-    retriever = vectorstore.as_retriever()
-
-    # Create a RetrievalQA chain
-    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever)
-
-    # User input for questions
-    question = st.text_input("Ask a question about the PDF:")
-
-    if question:
-        answer = qa_chain.run(question)
-        st.write("Answer:", answer)
+    except Exception as e:
+        st.error(f"❌ Failed to process PDF: {e}")
