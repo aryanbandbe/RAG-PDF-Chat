@@ -1,9 +1,8 @@
+
 streamlit
 PyPDF2
 langchain
-langchain-huggingface
-faiss-cpu
+langchain_huggingface
 sentence-transformers
-torch==2.0.1
-transformers
-pdfminer.six
+faiss-cpu
+huggingface_hub
