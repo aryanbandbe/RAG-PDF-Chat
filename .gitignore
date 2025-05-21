@@ -1,20 +1,9 @@
-# Ignore Python artifacts
-__pycache__/
-*.py[cod]
-*.egg-info/
-dist/
-build/
-*.log
-
-# VSCode settings
-.vscode/
-
-# Env files
 .env
-
-# Streamlit cache
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.vscode/
 .streamlit/
-
-# FAISS index files if saved
-index.faiss
-index.pkl
+*.faiss
+*.pkl
