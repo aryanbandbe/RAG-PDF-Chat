@@ -1,6 +1,6 @@
 streamlit
-python-dotenv
-PyPDF2
 langchain
+langchain-community
+python-dotenv
 huggingface_hub
-sentence-transformers
+pypdf

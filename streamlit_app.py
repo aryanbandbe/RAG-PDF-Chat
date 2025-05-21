@@ -1,71 +1,50 @@
 import os
 import streamlit as st
-from dotenv import load_dotenv
-
-from PyPDF2 import PdfReader
-from langchain.text_splitter import CharacterTextSplitter
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.vectorstores import FAISS
-from langchain.prompts import PromptTemplate
-from langchain.chains.combine_documents import StuffDocumentsChain
-from langchain.llms import HuggingFaceHub
+from langchain.document_loaders import PyPDFLoader, TextLoader
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.llms import OpenAI
+from langchain.chains import RetrievalQA
 
-# Load .env variables
-load_dotenv()
-api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+# Replace with your OpenAI API key
+os.environ["OPENAI_API_KEY"] = "your-api-key-here"
 
-if not api_token:
-    st.error("❌ API token not found. Please add it to a `.env` file.")
-    st.stop()
+st.set_page_config(page_title="Document Q&A", layout="wide")
+st.title("📄 Ask Questions About Your Document")
 
-st.title("📄 Chat with Your PDF")
+uploaded_file = st.file_uploader("Upload a PDF or Text File", type=["pdf", "txt"])
 
-pdf = st.file_uploader("Upload a PDF", type="pdf")
+if uploaded_file is not None:
+    file_path = f"temp_file.{uploaded_file.type.split('/')[-1]}"
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.read())
 
-if pdf is not None:
-    # Step 1: Extract text
-    reader = PdfReader(pdf)
-    raw_text = ""
-    for page in reader.pages:
-        if text := page.extract_text():
-            raw_text += text
+    # Load the document
+    if file_path.endswith(".pdf"):
+        loader = PyPDFLoader(file_path)
+    else:
+        loader = TextLoader(file_path)
 
-    # Step 2: Split text into chunks
-    splitter = CharacterTextSplitter(separator="\n", chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.create_documents([raw_text])
+    docs = loader.load()
 
-    # Step 3: Create embeddings and FAISS vector store
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-    db = FAISS.from_documents(chunks, embeddings)
-    retriever = db.as_retriever()
+    # Split into chunks
+    text_splitter = CharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    documents = text_splitter.split_documents(docs)
 
-    # Step 4: Setup LLM using HuggingFaceHub (NOT HuggingFaceEndpoint)
-    llm = HuggingFaceHub(
-        repo_id="google/flan-t5-base",
-        model_kwargs={"temperature": 0.5, "max_length": 512},
-        huggingfacehub_api_token=api_token
-    )
+    # Embed and store in FAISS
+    embeddings = OpenAIEmbeddings()
+    vectorstore = FAISS.from_documents(documents, embeddings)
+    retriever = vectorstore.as_retriever()
 
-    # Step 5: Create a prompt and chain
-    prompt = PromptTemplate(
-        input_variables=["context", "question"],
-        template="""
-Use the context below to answer the question.
+    # Set up LLM and QA Chain
+    llm = OpenAI(temperature=0)
+    chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type="stuff")
 
-Context:
-{context}
-
-Question:
-{question}
-
-Answer:"""
-    )
-
-    chain = StuffDocumentsChain(llm_chain=prompt | llm, document_variable_name="context")
-
-    # Step 6: User Query
-    query = st.text_input("Ask a question about the PDF:")
+    # Input box
+    query = st.text_input("Ask a question about the document:")
     if query:
-        docs = retriever.invoke(query)
-        response = chain.invoke({"question": query, "context": docs})
-        st.write(response["output"])
+        with st.spinner("Generating answer..."):
+            result = chain.run(query)
+            st.write("### 📌 Answer:")
+            st.write(result)

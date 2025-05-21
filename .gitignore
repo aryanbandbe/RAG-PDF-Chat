@@ -1,9 +1,5 @@
 .env
 __pycache__/
 *.pyc
-*.pyo
-*.log
-.vscode/
-.streamlit/
-*.faiss
 *.pkl
+.DS_Store
